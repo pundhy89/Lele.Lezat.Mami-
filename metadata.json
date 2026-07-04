@@ -1,0 +1,6 @@
+{
+  "name": "LeleSales - Aplikasi Penjualan Lele",
+  "description": "Aplikasi untuk mencatat transaksi penjualan ikan lele, menghitung berat total dikurangi tara, menyimpan ke database, dan mencetak struk format JPEG untuk dikirim via WhatsApp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

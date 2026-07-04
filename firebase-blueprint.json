@@ -1,0 +1,55 @@
+{
+  "entities": {
+    "customer": {
+      "title": "Customer",
+      "description": "A customer who buys items.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["name"]
+    },
+    "transaction": {
+      "title": "Transaction",
+      "description": "A sale transaction.",
+      "type": "object",
+      "properties": {
+        "customerName": {
+          "type": "string"
+        },
+        "customerId": {
+          "type": "string"
+        },
+        "totalPrice": {
+          "type": "number"
+        }
+      },
+      "required": ["customerName", "totalPrice"]
+    }
+  },
+  "firestore": {
+    "customers/{customerId}": {
+      "schema": {
+        "$ref": "#/entities/customer"
+      },
+      "description": "Customers collection"
+    },
+    "transactions/{transactionId}": {
+      "schema": {
+        "$ref": "#/entities/transaction"
+      },
+      "description": "Transactions collection"
+    },
+    "settings/default": {
+      "schema": {
+        "title": "Settings",
+        "description": "App settings",
+        "type": "object",
+        "properties": {}
+      },
+      "description": "App settings document"
+    }
+  }
+}
