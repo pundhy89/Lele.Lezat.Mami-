@@ -1,12 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { doc, getDoc, collection, query, where, orderBy, getDocs, addDoc, updateDoc, increment } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, orderBy, getDocs, addDoc, updateDoc, increment, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Customer, Transaction, Payment } from '../types';
+import { Customer, Transaction, Payment, AppSettings } from '../types';
 import { format } from 'date-fns';
-import { ArrowLeft, CreditCard, Camera, Receipt, Clock } from 'lucide-react';
+import { ArrowLeft, CreditCard, Camera, Receipt, Clock, Trash2, Edit2, Share2, Printer, Download, X } from 'lucide-react';
 import { compressImage } from '../lib/utils';
 import PrinterLayout from './PrinterLayout';
+import { motion, useAnimation, PanInfo } from 'motion/react';
+import { toJpeg } from 'html-to-image';
 
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
@@ -24,6 +26,14 @@ export default function CustomerDetail() {
   const [paymentType, setPaymentType] = useState<'payment' | 'debt'>('payment');
   const [paymentDate, setPaymentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [paymentSort, setPaymentSort] = useState<'date-desc' | 'date-asc' | 'type'>('date-desc');
+  
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const reportRef = useRef<HTMLDivElement>(null);
+  const [jpegDataUrl, setJpegDataUrl] = useState<string | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -38,6 +48,11 @@ export default function CustomerDetail() {
       const custSnap = await getDoc(doc(db, 'customers', id!));
       if (custSnap.exists()) {
         setCustomer({ id: custSnap.id, ...custSnap.data() } as Customer);
+      }
+      
+      const setSnap = await getDoc(doc(db, 'settings', 'default'));
+      if (setSnap.exists()) {
+        setSettings(setSnap.data() as AppSettings);
       }
 
       // 2. Get transactions
@@ -74,24 +89,44 @@ export default function CustomerDetail() {
     try {
       const now = new Date();
       
-      await addDoc(collection(db, 'payments'), {
-        customerId: id,
-        amount: amountNum,
-        type: paymentType,
-        date: paymentDate,
-        time: format(now, 'HH:mm'),
-        notes: paymentNotes,
-        photoUrl: paymentPhotoUrl,
-        createdAt: Date.now()
-      });
+      let debtChange = paymentType === 'debt' ? amountNum : -amountNum;
+      
+      if (editingPaymentId) {
+        // Find old payment to revert its effect
+        const oldPayment = payments.find(p => p.id === editingPaymentId);
+        if (oldPayment) {
+          const oldDebtChange = oldPayment.type === 'debt' ? oldPayment.amount : -oldPayment.amount;
+          debtChange = debtChange - oldDebtChange;
+        }
+        
+        await updateDoc(doc(db, 'payments', editingPaymentId), {
+          amount: amountNum,
+          type: paymentType,
+          date: paymentDate,
+          notes: paymentNotes,
+          photoUrl: paymentPhotoUrl
+        });
+      } else {
+        await addDoc(collection(db, 'payments'), {
+          customerId: id,
+          amount: amountNum,
+          type: paymentType,
+          date: paymentDate,
+          time: format(now, 'HH:mm'),
+          notes: paymentNotes,
+          photoUrl: paymentPhotoUrl,
+          createdAt: Date.now()
+        });
+      }
 
-      const debtChange = paymentType === 'debt' ? amountNum : -amountNum;
-
-      await updateDoc(doc(db, 'customers', id!), {
-        debtAmount: increment(debtChange)
-      });
+      if (debtChange !== 0) {
+        await updateDoc(doc(db, 'customers', id!), {
+          debtAmount: increment(debtChange)
+        });
+      }
 
       setShowPaymentForm(false);
+      setEditingPaymentId(null);
       setPaymentAmount('');
       setPaymentNotes('');
       setPaymentPhotoUrl('');
@@ -103,6 +138,122 @@ export default function CustomerDetail() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleDeletePayment = async (p: Payment) => {
+    if (!confirm('Hapus mutasi/pembayaran ini?')) return;
+    try {
+      await deleteDoc(doc(db, 'payments', p.id!));
+      const debtChange = p.type === 'debt' ? -p.amount : p.amount;
+      await updateDoc(doc(db, 'customers', id!), {
+        debtAmount: increment(debtChange)
+      });
+      loadCustomerData();
+    } catch (error) {
+      console.error("Error deleting payment", error);
+      alert("Gagal menghapus pembayaran");
+    }
+  };
+
+  const handleEditPayment = (p: Payment) => {
+    setEditingPaymentId(p.id!);
+    setPaymentAmount(p.amount.toString());
+    setPaymentType(p.type);
+    setPaymentDate(p.date);
+    setPaymentNotes(p.notes || '');
+    setPaymentPhotoUrl(p.photoUrl || '');
+    setShowPaymentForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const sortedPayments = useMemo(() => {
+    const arr = [...payments];
+    if (paymentSort === 'date-desc') {
+      arr.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime() || b.createdAt - a.createdAt);
+    } else if (paymentSort === 'date-asc') {
+      arr.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.createdAt - b.createdAt);
+    } else if (paymentSort === 'type') {
+      arr.sort((a, b) => a.type.localeCompare(b.type) || new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
+    return arr;
+  }, [payments, paymentSort]);
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const handleOpenShareModal = () => {
+    setShowShareModal(true);
+  };
+
+  useEffect(() => {
+    if (showShareModal && reportRef.current) {
+      generateJpeg();
+    }
+  }, [showShareModal]);
+
+  const generateJpeg = async () => {
+    if (!reportRef.current) return;
+    setGenerating(true);
+    try {
+      await new Promise(res => setTimeout(res, 200));
+      const dataUrl = await toJpeg(reportRef.current, { quality: 0.95, backgroundColor: '#ffffff' });
+      setJpegDataUrl(dataUrl);
+    } catch (err) {
+      console.error("Error generating JPEG", err);
+      alert("Gagal membuat gambar laporan");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const downloadImage = () => {
+    if (!jpegDataUrl || !customer) return;
+    const link = document.createElement('a');
+    link.download = `Laporan-Piutang-${customer.name}.jpg`;
+    link.href = jpegDataUrl;
+    link.click();
+  };
+
+  const handleShareApp = async () => {
+    if (!jpegDataUrl || !customer) return;
+    try {
+      const res = await fetch(jpegDataUrl);
+      const blob = await res.blob();
+      const file = new File([blob], `Laporan-Piutang-${customer.name}.jpg`, { type: 'image/jpeg' });
+
+      if (navigator.share) {
+        await navigator.share({
+          title: `Laporan Piutang - ${customer.name}`,
+          text: `Laporan Piutang/Mutasi ${customer.name}`,
+          files: [file]
+        });
+      } else {
+        downloadImage();
+      }
+    } catch (error) {
+      console.error('Error sharing image:', error);
+    }
+  };
+
+  const openWhatsApp = (phone?: string) => {
+    if (!customer) return;
+    let targetPhone = phone || '';
+    if (targetPhone.startsWith('+')) {
+      targetPhone = targetPhone.substring(1);
+    } else if (targetPhone.startsWith('0')) {
+      targetPhone = '62' + targetPhone.substring(1);
+    }
+    
+    const text = `Laporan Piutang & Mutasi ${settings?.companyName || 'LELE SALES'}
+Pelanggan: ${customer.name}
+Total Piutang Saat Ini: Rp ${(customer.debtAmount || 0).toLocaleString('id-ID')}
+
+Terima kasih.`;
+
+    const encodedText = encodeURIComponent(text);
+    const url = `https://wa.me/${targetPhone}?text=${encodedText}`;
+    window.open(url, '_blank');
   };
 
   if (loading) {
@@ -326,49 +477,194 @@ export default function CustomerDetail() {
           )}
 
           <div className="bg-[#FDFBF7] rounded-2xl border border-dashed border-[#E5E0D8] overflow-hidden">
+            <div className="p-4 border-b border-[#E5E0D8] flex flex-wrap gap-4 justify-between items-center bg-[#F4ECE4]/30">
+              <div className="flex items-center gap-3">
+                <label className="text-sm font-medium text-[#8B847C]">Urutkan:</label>
+                <select 
+                  value={paymentSort} 
+                  onChange={e => setPaymentSort(e.target.value as any)}
+                  className="text-sm bg-white border border-[#E5E0D8] rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#8B847C]/20"
+                >
+                  <option value="date-desc">Tanggal (Terbaru)</option>
+                  <option value="date-asc">Tanggal (Terlama)</option>
+                  <option value="type">Tipe Mutasi</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={handlePrint} className="flex items-center gap-1.5 text-sm font-medium text-[#4A4540] bg-white border border-[#E5E0D8] px-3 py-1.5 rounded-lg hover:bg-[#F4ECE4] transition-colors">
+                  <Printer className="w-4 h-4" /> Cetak
+                </button>
+                <button onClick={handleOpenShareModal} className="flex items-center gap-1.5 text-sm font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors">
+                  <Share2 className="w-4 h-4" /> Bagikan
+                </button>
+              </div>
+            </div>
+
+            <div className="p-2 text-center text-xs text-[#8B847C] bg-amber-50 border-b border-amber-100">
+              <span className="hidden sm:inline">Geser baris ke <strong>kiri</strong> untuk hapus, geser ke <strong>kanan</strong> untuk edit.</span>
+              <span className="sm:hidden">Geser baris ke <strong>kiri</strong> (hapus), ke <strong>kanan</strong> (edit).</span>
+            </div>
+
             {payments.length === 0 ? (
               <div className="p-8 text-center text-[#A39B91]">Belum ada mutasi utang / pembayaran</div>
             ) : (
-              <table className="w-full text-left text-sm text-[#8B847C]">
-                <thead className="bg-[#F4ECE4] text-[#4A4540] font-semibold border-b border-[#E5E0D8]">
-                  <tr>
-                    <th className="px-6 py-4">Tanggal</th>
-                    <th className="px-6 py-4">Tipe</th>
-                    <th className="px-6 py-4">Nominal</th>
-                    <th className="px-6 py-4">Catatan</th>
-                    <th className="px-6 py-4">Bukti</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#E5E0D8]">
-                  {payments.map(p => (
-                    <tr key={p.id} className="hover:bg-[#F4ECE4]/50 transition-colors">
-                      <td className="px-6 py-4">{format(new Date(p.date), 'dd MMM yyyy')} <span className="text-[#A39B91] text-xs ml-1">{p.time}</span></td>
-                      <td className="px-6 py-4">
-                        {p.type === 'debt' ? (
-                          <span className="px-2 py-1 bg-red-50 text-red-600 rounded-md text-xs font-semibold">Penambahan Utang</span>
-                        ) : (
-                          <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-md text-xs font-semibold">Pembayaran Masuk</span>
-                        )}
-                      </td>
-                      <td className={`px-6 py-4 font-semibold ${p.type === 'debt' ? 'text-red-600' : 'text-emerald-600'}`}>
-                        {p.type === 'debt' ? '+' : '-'} Rp {p.amount.toLocaleString('id-ID')}
-                      </td>
-                      <td className="px-6 py-4">{p.notes || '-'}</td>
-                      <td className="px-6 py-4">
-                        {p.photoUrl ? (
-                          <a href={p.photoUrl} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline flex items-center gap-1">
-                            <Camera className="w-4 h-4" /> Lihat
-                          </a>
-                        ) : '-'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="flex flex-col">
+                {sortedPayments.map(p => (
+                  <PaymentRow 
+                    key={p.id} 
+                    p={p} 
+                    onEdit={handleEditPayment} 
+                    onDelete={handleDeletePayment} 
+                  />
+                ))}
+              </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Share Modal */}
+      {showShareModal && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center p-4 border-b border-slate-100">
+              <h3 className="font-semibold text-slate-800">Bagikan Laporan</h3>
+              <button onClick={() => setShowShareModal(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+            
+            <div className="p-4 bg-slate-200/50 overflow-y-auto flex-1 flex flex-col items-center justify-center min-h-[400px]">
+              <div className="absolute top-[-9999px] left-[-9999px]">
+                <div ref={reportRef} className="w-[400px] p-6 bg-white text-slate-800 font-sans">
+                  <div className="text-center mb-6 border-b-2 border-dashed border-slate-200 pb-4">
+                    <h2 className="text-xl font-bold tracking-tight uppercase text-slate-900">{settings?.companyName || 'LELE SALES'}</h2>
+                    <p className="text-sm text-slate-500 mt-1">Laporan Mutasi Piutang</p>
+                  </div>
+                  
+                  <div className="mb-6 space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Pelanggan:</span>
+                      <span className="font-semibold">{customer?.name}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Dicetak:</span>
+                      <span className="font-medium">{format(new Date(), 'dd MMM yyyy HH:mm')}</span>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-200 pt-4 mb-4">
+                    {sortedPayments.map(p => (
+                      <div key={p.id} className="flex justify-between items-start mb-3 text-sm">
+                        <div>
+                          <div className="font-medium">{format(new Date(p.date), 'dd MMM yyyy')}</div>
+                          <div className="text-xs text-slate-500">{p.type === 'debt' ? 'Utang Baru' : 'Pembayaran'} {p.notes ? `- ${p.notes}` : ''}</div>
+                        </div>
+                        <div className={`font-semibold ${p.type === 'debt' ? 'text-red-600' : 'text-emerald-600'}`}>
+                          {p.type === 'debt' ? '+' : '-'} {p.amount.toLocaleString('id-ID')}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="border-t-2 border-dashed border-slate-200 pt-4 mt-2">
+                    <div className="flex justify-between items-center">
+                      <span className="font-semibold text-slate-700">Total Piutang:</span>
+                      <span className="text-xl font-black text-slate-900">Rp {(customer?.debtAmount || 0).toLocaleString('id-ID')}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {generating ? (
+                <div className="text-slate-500 flex flex-col items-center gap-3 py-10">
+                  <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+                  <p className="text-sm font-medium">Memproses laporan JPEG...</p>
+                </div>
+              ) : jpegDataUrl ? (
+                <div className="flex flex-col items-center gap-2">
+                  <img src={jpegDataUrl} alt="Laporan JPEG" className="w-[400px] max-w-full h-auto shadow-md rounded-lg border border-slate-200" />
+                  <p className="text-[10px] text-slate-400 mt-1">Tekan & tahan gambar untuk menyimpan manual jika tombol gagal</p>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="p-4 border-t border-slate-100 bg-white space-y-3">
+              {generating ? null : (
+                <>
+                  <button onClick={() => openWhatsApp(customer?.phone)} className="w-full bg-emerald-500 text-white hover:bg-emerald-600 font-medium py-3 rounded-xl flex items-center justify-center gap-2 transition-colors">
+                    <Share2 className="w-4 h-4" /> WA Pelanggan
+                  </button>
+                  <div className="grid grid-cols-2 gap-3 pt-2">
+                    <button onClick={handleShareApp} className="w-full bg-blue-50 hover:bg-blue-100 text-blue-600 font-medium py-3 rounded-xl flex items-center justify-center gap-2 transition-colors text-sm">
+                      <Share2 className="w-4 h-4" /> Bagikan File
+                    </button>
+                    <button onClick={downloadImage} className="w-full bg-slate-50 hover:bg-slate-100 text-slate-600 font-medium py-3 rounded-xl flex items-center justify-center gap-2 transition-colors text-sm">
+                      <Download className="w-4 h-4" /> Unduh JPG
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
     </PrinterLayout>
   );
 }
+
+const PaymentRow = ({ p, onEdit, onDelete }: { key?: string | number, p: Payment, onEdit: (p: Payment) => void, onDelete: (p: Payment) => void }) => {
+  const controls = useAnimation();
+  
+  const handleDragEnd = (event: any, info: PanInfo) => {
+    const threshold = 80;
+    if (info.offset.x > threshold) {
+      onEdit(p);
+      controls.start({ x: 0 });
+    } else if (info.offset.x < -threshold) {
+      onDelete(p);
+      controls.start({ x: 0 });
+    } else {
+      controls.start({ x: 0 });
+    }
+  };
+
+  return (
+    <div className="relative border-b border-[#E5E0D8] overflow-hidden group bg-slate-100">
+      <div className="absolute inset-0 flex justify-between items-center px-6 pointer-events-none">
+        <div className="text-blue-600 font-medium flex items-center gap-2"><Edit2 className="w-5 h-5"/> Edit</div>
+        <div className="text-red-500 font-medium flex items-center gap-2">Hapus <Trash2 className="w-5 h-5"/></div>
+      </div>
+      
+      <motion.div
+        drag="x"
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={0.2}
+        onDragEnd={handleDragEnd}
+        animate={controls}
+        className="relative bg-[#FDFBF7] p-4 flex flex-col sm:flex-row sm:items-center gap-4 hover:bg-[#F4ECE4]/50 transition-colors z-10 w-full"
+      >
+        <div className="flex-1 pointer-events-none">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-medium text-[#4A4540]">{format(new Date(p.date), 'dd MMM yyyy')}</span>
+            <span className="text-[#A39B91] text-xs">{p.time}</span>
+            {p.type === 'debt' ? (
+              <span className="px-2 py-0.5 bg-red-50 text-red-600 rounded-md text-xs font-semibold ml-2">Utang</span>
+            ) : (
+              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded-md text-xs font-semibold ml-2">Lunas</span>
+            )}
+          </div>
+          {p.notes && <div className="text-sm text-[#8B847C]">{p.notes}</div>}
+        </div>
+        <div className={`font-semibold text-lg pointer-events-none ${p.type === 'debt' ? 'text-red-600' : 'text-emerald-600'}`}>
+          {p.type === 'debt' ? '+' : '-'} Rp {p.amount.toLocaleString('id-ID')}
+        </div>
+        {p.photoUrl && (
+          <a href={p.photoUrl} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline flex items-center gap-1 text-sm bg-blue-50 px-3 py-1.5 rounded-lg shrink-0" onPointerDown={(e) => e.stopPropagation()}>
+            <Camera className="w-4 h-4" /> Bukti
+          </a>
+        )}
+      </motion.div>
+    </div>
+  );
+};

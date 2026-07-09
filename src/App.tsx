@@ -19,8 +19,15 @@ import { motion } from 'motion/react';
 
 function TopBar() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [isIframe, setIsIframe] = useState(false);
 
   useEffect(() => {
+    try {
+      setIsIframe(window.self !== window.top);
+    } catch (e) {
+      setIsIframe(true);
+    }
+    
     async function loadSettings() {
       try {
         const snap = await getDoc(doc(db, 'settings', 'default'));
@@ -37,7 +44,13 @@ function TopBar() {
   const companyName = settings?.companyName || "Nama Perusahaan";
 
   return (
-    <header className="bg-[#F4ECE4]/50 backdrop-blur-md sticky top-0 z-40 pt-4 pb-2 px-4 border-b border-[#E5E0D8]/50">
+    <>
+      {isIframe && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs px-4 py-2 text-center relative z-50">
+          <span className="font-medium">Mode Pratinjau:</span> Fitur cetak/unduh mungkin diblokir browser. Gunakan opsi tekan & tahan gambar, atau <strong>Buka di tab baru</strong>.
+        </div>
+      )}
+      <header className="bg-[#F4ECE4]/50 backdrop-blur-md sticky top-0 z-40 pt-4 pb-2 px-4 border-b border-[#E5E0D8]/50">
       <div className="max-w-7xl mx-auto flex items-center justify-center">
         <div className="font-bold text-lg text-[#8B847C] tracking-tight flex items-center gap-2 bg-[#FDFBF7] px-4 py-2 rounded-2xl shadow-sm border border-[#E5E0D8]">
           {settings?.logoUrl && (
@@ -47,6 +60,7 @@ function TopBar() {
         </div>
       </div>
     </header>
+    </>
   );
 }
 

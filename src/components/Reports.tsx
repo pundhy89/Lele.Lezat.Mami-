@@ -209,7 +209,10 @@ export default function Reports() {
                   <p className="text-sm font-medium">Memproses nota JPEG...</p>
                 </div>
               ) : jpegDataUrl ? (
-                <img src={jpegDataUrl} alt="Struk JPEG" className="w-[400px] max-w-full h-auto shadow-md rounded-lg border border-slate-200" />
+                <div className="flex flex-col items-center gap-2">
+                  <img src={jpegDataUrl} alt="Struk JPEG" className="w-[400px] max-w-full h-auto shadow-md rounded-lg border border-slate-200" />
+                  <p className="text-[10px] text-slate-400 mt-1">Tekan & tahan gambar untuk menyimpan manual jika tombol gagal</p>
+                </div>
               ) : null}
             </div>
 

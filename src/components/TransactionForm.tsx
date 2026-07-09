@@ -437,20 +437,28 @@ Terima kasih.`;
               </button>
             </div>
             
-            <div className="p-4 bg-slate-50 overflow-y-auto flex-1">
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 bg-slate-200/50 overflow-y-auto flex-1 flex flex-col items-center justify-center min-h-[400px]">
+              <div className="absolute top-[-9999px] left-[-9999px]">
                 <div ref={receiptRef}>
                   <Receipt tx={savedTx} settings={settings} />
                 </div>
               </div>
+              
+              {generating ? (
+                <div className="text-slate-500 flex flex-col items-center gap-3 py-10">
+                  <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+                  <p className="text-sm font-medium">Memproses nota JPEG...</p>
+                </div>
+              ) : jpegDataUrl ? (
+                <div className="flex flex-col items-center gap-2">
+                  <img src={jpegDataUrl} alt="Struk JPEG" className="w-[400px] max-w-full h-auto shadow-md rounded-lg border border-slate-200" />
+                  <p className="text-[10px] text-slate-400 mt-1">Tekan & tahan gambar untuk menyimpan manual jika tombol gagal</p>
+                </div>
+              ) : null}
             </div>
 
             <div className="p-4 border-t border-slate-100 bg-white space-y-3">
-              {generating ? (
-                <div className="text-center text-sm text-slate-500 py-4 animate-pulse">
-                  Menyiapkan struk...
-                </div>
-              ) : (
+              {generating ? null : (
                 <>
                   {settings?.adminPhones && settings.adminPhones.split(',').map((phone, i) => {
                     const cleanPhone = phone.trim();
