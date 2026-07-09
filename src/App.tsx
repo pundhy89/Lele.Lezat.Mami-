@@ -76,7 +76,7 @@ function BottomNavBar() {
   const location = useLocation();
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 p-4 pb-6 pointer-events-none flex justify-center">
+    <div id="bottom-nav-bar" className="fixed bottom-0 left-0 right-0 z-40 p-4 pb-6 pointer-events-none flex justify-center">
       <div className="bg-[#EBE2D9] border border-[#E3D9CE] px-2 py-2 rounded-[2rem] flex items-center justify-between gap-2 pointer-events-auto shadow-2xl">
         {NAV_ITEMS.map((item) => {
           const isActive = location.pathname === item.to || 

@@ -1,25 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { format } from 'date-fns';
-import { collection, addDoc, getDocs, doc, updateDoc, increment, getDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, increment, getDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Transaction, Customer, AppSettings } from '../types';
 import { Plus, Minus, ChevronDown, Share2, Printer, Download, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import PrinterLayout from './PrinterLayout';
 import { toJpeg } from 'html-to-image';
 import Receipt from './Receipt';
 
 export default function TransactionForm() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const editTx = location.state?.editTx as Transaction | undefined;
+
   const [customers, setCustomers] = useState<Customer[]>([]);
 
-  const [customerId, setCustomerId] = useState('');
-  const [customerName, setCustomerName] = useState('');
-  const [weights, setWeights] = useState<string[]>(['']);
-  const [taraPercentage, setTaraPercentage] = useState<number>(3);
-  const [pricePerKg, setPricePerKg] = useState<number>(0);
-  const [footnote, setFootnote] = useState('');
-  const [isDebt, setIsDebt] = useState(false);
+  const [customerId, setCustomerId] = useState(editTx?.customerId || '');
+  const [customerName, setCustomerName] = useState(editTx?.customerName || '');
+  const [weights, setWeights] = useState<string[]>(editTx ? editTx.weights.map(String) : ['']);
+  const [taraPercentage, setTaraPercentage] = useState<number>(editTx?.taraPercentage ?? 3);
+  const [pricePerKg, setPricePerKg] = useState<number>(editTx?.pricePerKg || 0);
+  const [footnote, setFootnote] = useState(editTx?.footnote || '');
+  const [isDebt, setIsDebt] = useState(editTx?.isDebt || false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -141,7 +144,21 @@ export default function TransactionForm() {
         createdAt: Date.now()
       };
 
-      const newTxRef = await addDoc(collection(db, 'transactions'), transactionData);
+            let newTxId;
+      if (editTx && editTx.id) {
+        await updateDoc(doc(db, 'transactions', editTx.id), transactionData);
+        newTxId = editTx.id;
+        
+        // Revert old debt if it was debt
+        if (editTx.isDebt && editTx.customerId) {
+          await updateDoc(doc(db, 'customers', editTx.customerId), {
+            debtAmount: increment(-editTx.totalPrice)
+          });
+        }
+      } else {
+        const newTxRef = await addDoc(collection(db, 'transactions'), transactionData);
+        newTxId = newTxRef.id;
+      }
       
       if (isDebt) {
         await updateDoc(doc(db, 'customers', finalCustomerId), {
@@ -158,7 +175,7 @@ export default function TransactionForm() {
         });
       }
 
-      return { id: newTxRef.id, ...transactionData };
+      return { id: newTxId, ...transactionData };
     } catch (error) {
       console.error('Error saving transaction: ', error);
       alert('Gagal menyimpan transaksi');
@@ -216,7 +233,9 @@ export default function TransactionForm() {
     const link = document.createElement('a');
     link.download = `struk-${savedTx.customerName}-${savedTx.id}.jpg`;
     link.href = jpegDataUrl;
+    document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
   };
 
   const handleShareApp = async () => {
@@ -235,8 +254,11 @@ export default function TransactionForm() {
       } else {
         downloadImage();
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sharing image:', error);
+      if (error.name !== 'AbortError') {
+        downloadImage();
+      }
     }
   };
 
@@ -440,7 +462,7 @@ Terima kasih.`;
             <div className="p-4 bg-slate-200/50 overflow-y-auto flex-1 flex flex-col items-center justify-center min-h-[400px]">
               <div className="absolute top-[-9999px] left-[-9999px]">
                 <div ref={receiptRef}>
-                  <Receipt tx={savedTx} settings={settings} />
+                  <Receipt transaction={savedTx} settings={settings} />
                 </div>
               </div>
               
@@ -501,6 +523,26 @@ Terima kasih.`;
                       <Download className="w-4 h-4" /> Unduh
                     </button>
                   </div>
+                                    <button
+                    onClick={async () => {
+                      if (window.confirm("Batalkan transaksi ini? (Data akan dihapus)")) {
+                         try {
+                           await deleteDoc(doc(db, 'transactions', savedTx.id));
+                           if (savedTx.isDebt && savedTx.customerId) {
+                             await updateDoc(doc(db, 'customers', savedTx.customerId), {
+                               debtAmount: increment(-savedTx.totalPrice)
+                             });
+                           }
+                           setSavedTx(null);
+                         } catch(e) {
+                           alert("Gagal membatalkan transaksi");
+                         }
+                      }
+                    }}
+                    className="w-full bg-red-50 hover:bg-red-100 text-red-600 font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors mt-4 text-sm border border-red-100"
+                  >
+                    Batal (Tidak Jadi)
+                  </button>
                   <button
                     onClick={handlePrint}
                     className="w-full bg-slate-800 hover:bg-slate-900 text-white font-medium py-3 rounded-xl flex items-center justify-center gap-2 transition-colors mt-2 text-sm"

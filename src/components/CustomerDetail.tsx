@@ -212,7 +212,9 @@ export default function CustomerDetail() {
     const link = document.createElement('a');
     link.download = `Laporan-Piutang-${customer.name}.jpg`;
     link.href = jpegDataUrl;
+    document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
   };
 
   const handleShareApp = async () => {
@@ -231,8 +233,11 @@ export default function CustomerDetail() {
       } else {
         downloadImage();
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sharing image:', error);
+      if (error.name !== 'AbortError') {
+        downloadImage();
+      }
     }
   };
 
@@ -335,11 +340,7 @@ Terima kasih.`;
                     <td className="px-6 py-4">Rp {t.pricePerKg.toLocaleString('id-ID')}</td>
                     <td className="px-6 py-4 font-medium text-[#4A4540]">Rp {t.totalPrice.toLocaleString('id-ID')}</td>
                     <td className="px-6 py-4">
-                      {t.isDebt ? (
-                        <span className="px-2 py-1 bg-red-50 text-red-600 rounded-md text-xs font-semibold">Utang</span>
-                      ) : (
-                        <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-md text-xs font-semibold">Lunas</span>
-                      )}
+                      
                     </td>
                   </tr>
                 ))}
@@ -525,7 +526,7 @@ Terima kasih.`;
 
       {/* Share Modal */}
       {showShareModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4 hide-nav">
           <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
             <div className="flex justify-between items-center p-4 border-b border-slate-100">
               <h3 className="font-semibold text-slate-800">Bagikan Laporan</h3>
@@ -617,7 +618,7 @@ const PaymentRow = ({ p, onEdit, onDelete }: { key?: string | number, p: Payment
   const controls = useAnimation();
   
   const handleDragEnd = (event: any, info: PanInfo) => {
-    const threshold = 80;
+    const threshold = 30; // Very responsive
     if (info.offset.x > threshold) {
       onEdit(p);
       controls.start({ x: 0 });
@@ -642,28 +643,29 @@ const PaymentRow = ({ p, onEdit, onDelete }: { key?: string | number, p: Payment
         dragElastic={0.2}
         onDragEnd={handleDragEnd}
         animate={controls}
-        className="relative bg-[#FDFBF7] p-4 flex flex-col sm:flex-row sm:items-center gap-4 hover:bg-[#F4ECE4]/50 transition-colors z-10 w-full"
+        className="relative bg-[#FDFBF7] px-4 py-3 hover:bg-[#F4ECE4]/50 transition-colors z-10 w-full cursor-pointer"
       >
-        <div className="flex-1 pointer-events-none">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="font-medium text-[#4A4540]">{format(new Date(p.date), 'dd MMM yyyy')}</span>
-            <span className="text-[#A39B91] text-xs">{p.time}</span>
-            {p.type === 'debt' ? (
-              <span className="px-2 py-0.5 bg-red-50 text-red-600 rounded-md text-xs font-semibold ml-2">Utang</span>
-            ) : (
-              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded-md text-xs font-semibold ml-2">Lunas</span>
-            )}
+        <div className="w-full pointer-events-none">
+          <div className="flex items-center justify-between mb-0.5">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-sm text-[#4A4540]">{format(new Date(p.date), 'dd MMM yyyy')}</span>
+              <span className="text-[#A39B91] text-xs">{p.time}</span>
+            </div>
+            <div className={`font-bold text-sm pointer-events-none ${p.type === 'debt' ? 'text-red-600' : 'text-emerald-600'}`}>
+              {p.type === 'debt' ? '+' : '-'} Rp {p.amount.toLocaleString('id-ID')}
+            </div>
           </div>
-          {p.notes && <div className="text-sm text-[#8B847C]">{p.notes}</div>}
+          <div className="flex items-center justify-between mt-1">
+             <div className="text-sm text-[#8B847C]">
+               {p.notes || (p.type === 'payment' ? 'Pembayaran' : 'Utang')}
+             </div>
+             {p.photoUrl && (
+               <a href={p.photoUrl} target="_blank" rel="noreferrer" className="text-[#A39B91] hover:text-[#8B847C] transition-colors pointer-events-auto flex items-center gap-1" onPointerDown={(e) => e.stopPropagation()}>
+                 <Camera className="w-4 h-4" />
+               </a>
+             )}
+          </div>
         </div>
-        <div className={`font-semibold text-lg pointer-events-none ${p.type === 'debt' ? 'text-red-600' : 'text-emerald-600'}`}>
-          {p.type === 'debt' ? '+' : '-'} Rp {p.amount.toLocaleString('id-ID')}
-        </div>
-        {p.photoUrl && (
-          <a href={p.photoUrl} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline flex items-center gap-1 text-sm bg-blue-50 px-3 py-1.5 rounded-lg shrink-0" onPointerDown={(e) => e.stopPropagation()}>
-            <Camera className="w-4 h-4" /> Bukti
-          </a>
-        )}
       </motion.div>
     </div>
   );

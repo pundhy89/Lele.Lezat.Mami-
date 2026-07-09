@@ -45,7 +45,7 @@ export default function DebtReport() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div className="bg-[#F4ECE4] rounded-2xl border border-[#E5E0D8] p-4 text-center">
           <div className="text-sm font-medium text-[#8B847C] mb-1">Total Piutang Berjalan</div>
-          <div className="text-2xl font-black text-red-600">
+          <div className="text-xl font-bold text-red-600">
             Rp {totalDebt.toLocaleString('id-ID')}
           </div>
         </div>
